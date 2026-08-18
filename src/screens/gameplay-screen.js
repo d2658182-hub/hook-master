@@ -847,11 +847,26 @@ class GameplayScreen extends BaseScreen {
       </div>
     `;
     this.tutorialEl.style.display = 'flex';
-    this.tutorialEl.querySelector('.btn-tutorial-ok').addEventListener('click', () => {
-      this.game.audio.click();
+    const dismiss = () => {
       this.tutorialEl.style.display = 'none';
       this.tutorialActive = false;
+    };
+    this.tutorialEl.querySelector('.btn-tutorial-ok').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.game.audio.click();
+      dismiss();
     });
+    /* tap anywhere on the overlay to dismiss */
+    this.tutorialEl.addEventListener('click', dismiss, { once: true });
+    /* keyboard dismiss */
+    this._tutKeyHandler = (e) => {
+      if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') {
+        e.preventDefault();
+        dismiss();
+        window.removeEventListener('keydown', this._tutKeyHandler);
+      }
+    };
+    window.addEventListener('keydown', this._tutKeyHandler);
   }
 
   showBanner(banner) {
