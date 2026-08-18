@@ -444,7 +444,6 @@ class GameplayScreen extends BaseScreen {
     best.state = 'held';
     best.grabbed = true;
     this.carrying = best;
-    this.game.audio.sfx('grab');
     this.spawnBurst(hook.x, hook.y, 10, ['#ffffff', '#b9f6ff']);
   }
 
