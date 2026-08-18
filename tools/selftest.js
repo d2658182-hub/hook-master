@@ -119,34 +119,25 @@ window.__SELFTEST_RUN = async function run(game) {
   // swing the hook to the right and check the pendulum moves
   const startAngle = s.angle;
   s.swingDir = 1;
-  for (let i = 0; i < 15; i += 1) s.update(0.05);
+  for (let i = 0; i < 30; i += 1) s.update(0.05);
   s.swingDir = 0;
   check('gameplay: pendulum swings on input', Math.abs(s.angle - startAngle) > 0.02, 'd=' + (s.angle - startAngle).toFixed(3));
 
-  // reset any auto-grab that happened during the swing test
-  s.carrying = null;
-  s.falling = [];
-  s.stacked = [];
-  s.spec.crates.forEach((c) => { c.state = 'dock'; c.y = 780; });
-  s.cratesLeft = s.spec.crates.length;
-  s.cratesLost = 0;
-  s.autoGrabCooldown = 0;
-
-  // auto-grab: position hook over a crate and trigger auto-grab
+  // grab a crate when over it
+  const hook = s.hookPosition();
   const dockCrate = s.spec.crates.find((c) => c.state === 'dock');
   s.angle = Math.asin((dockCrate.x - s.spec.pivot.x) / s.spec.ropeLen);
   s.omega = 0;
-  s.tryAutoGrab();
-  check('gameplay: AUTO-GRAB picks the crate', s.carrying && s.carrying.state === 'held', 'carry=' + (s.carrying && s.carrying.state));
+  s.grabCrate();
+  check('gameplay: GRAB picks the crate', s.carrying && s.carrying.state === 'held', 'carry=' + (s.carrying && s.carrying.state));
 
-  // auto-drop: position hook over the ship hold
+  // drop over the ship → crate falls into the hold
   s.angle = Math.asin((s.shipX - s.spec.pivot.x) / s.spec.ropeLen);
   s.omega = 0;
-  s.overShip = false;
-  s.tryAutoDrop();
-  check('gameplay: AUTO-DROP releases the crate', s.carrying === null && s.falling.length === 1, 'falling=' + s.falling.length);
-  // simulate the fall (only physics, no auto-grab)
-  for (let i = 0; i < 120; i += 1) s.updateFalling(0.05);
+  s.dropCrate();
+  check('gameplay: DROP releases the crate', s.carrying === null && s.falling.length === 1, 'falling=' + s.falling.length);
+  // simulate the fall
+  for (let i = 0; i < 120; i += 1) s.update(0.05);
   check('gameplay: crate stacked in hold', s.stacked.length === 1, 'stacked=' + s.stacked.length);
 
   // ---------- VICTORY : load all remaining crates directly ----------
