@@ -1,9 +1,9 @@
 /* ============================================================
    GAMEPLAY SCREEN — Hook Master.
-   Pendulum crane: hold LEFT/RIGHT to swing the hook, GRAB to
-   pick a crate, DROP to release it into the rocking ship's
-   hold. Wind, moving ship, fragile crates, narrow holds,
-   storms and golden crates unlock along the level curve.
+   Pendulum crane: hold LEFT/RIGHT to swing the hook.
+   The hook AUTO-GRABS a crate when it passes over one,
+   and AUTO-DROPS it when it swings over the ship's hold.
+   Pure timing game — no grab button needed.
    ============================================================ */
 
 class GameplayScreen extends BaseScreen {
@@ -19,7 +19,7 @@ class GameplayScreen extends BaseScreen {
     this.particles = [];
     this.popups = [];
     this.shake = 0;
-    this.phase = 'playing';      // playing | winSeq | failSeq
+    this.phase = 'playing';
     this.phaseTimer = 0;
     this.winHandled = false;
     this.failHandled = false;
@@ -52,6 +52,9 @@ class GameplayScreen extends BaseScreen {
     this.world = null;
     this.shipX = 360;
     this.shipPhase = 0;
+    this.autoGrabCooldown = 0;
+    this.nearCrate = null;
+    this.overShip = false;
   }
 
   build() {
@@ -83,6 +86,7 @@ class GameplayScreen extends BaseScreen {
       </div>
     `;
 
+    /* ── controls: LEFT / RIGHT only (no GRAB button) ── */
     this.controls = document.createElement('div');
     this.controls.className = 'hook-controls';
     this.controls.innerHTML = `
@@ -94,12 +98,6 @@ class GameplayScreen extends BaseScreen {
         <button type="button" class="btn btn-swing btn-swing-right" aria-label="Swing right">
           <img src="assets/ui/b_7.png" alt="" draggable="false">
           <span class="btn-label">▶</span>
-        </button>
-      </div>
-      <div class="hook-drop">
-        <button type="button" class="btn btn-grabdrop btn-grabdrop-main" aria-label="Grab or drop">
-          <img src="assets/ui/b_4.png" alt="" draggable="false">
-          <span class="btn-label">GRAB</span>
         </button>
       </div>
     `;
@@ -191,24 +189,19 @@ class GameplayScreen extends BaseScreen {
     this.bindSwing(this.controls.querySelector('.btn-swing-left'), -1);
     this.bindSwing(this.controls.querySelector('.btn-swing-right'), 1);
 
-    this.controls.querySelector('.btn-grabdrop-main').addEventListener('click', () => {
-      this.onGrabDrop();
-    });
-
-    /* keyboard: arrows swing, space grabs/drops */
+    /* keyboard: arrows swing only (no grab — it's automatic) */
     this.onKeyDown((event) => {
       if (event.code === 'Escape') {
         if (this.paused) this.closePause();
         else this.openPause();
         return;
       }
-      if (event.code === 'ArrowLeft') this.swingDir = this.swingDir < 0 ? -1 : -1;
-      if (event.code === 'ArrowRight') this.swingDir = this.swingDir > 0 ? 1 : 1;
-      if (event.code === 'Space') this.onGrabDrop();
+      if (event.code === 'ArrowLeft' || event.code === 'KeyA') this.swingDir = -1;
+      if (event.code === 'ArrowRight' || event.code === 'KeyD') this.swingDir = 1;
     });
     this.onKeyUpHandler = (event) => {
-      if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
-        this.swingDir = this.swingDir > 0 ? (event.code === 'ArrowRight' ? 0 : this.swingDir) : (event.code === 'ArrowLeft' ? 0 : this.swingDir);
+      if (event.code === 'ArrowLeft' || event.code === 'ArrowRight' ||
+          event.code === 'KeyA' || event.code === 'KeyD') {
         this.swingDir = 0;
       }
     };
@@ -291,6 +284,9 @@ class GameplayScreen extends BaseScreen {
     this.angle = 0;
     this.omega = 0;
     this.windGust = 0;
+    this.autoGrabCooldown = 0;
+    this.nearCrate = null;
+    this.overShip = false;
 
     const spec = LevelGen.generate(level);
     this.spec = spec;
@@ -398,54 +394,62 @@ class GameplayScreen extends BaseScreen {
 
   /* ---------------- core actions ---------------- */
 
-  onGrabDrop() {
-    if (this.paused || this.tutorialActive || this.phase !== 'playing') return;
-    if (this.carrying) {
-      this.dropCrate();
-    } else {
-      this.grabCrate();
-    }
-  }
-
   hookPosition() {
     const s = this.spec;
-    const angle = this.angle;
-    const L = s.ropeLen;
     return {
-      x: s.pivot.x + Math.sin(angle) * L,
-      y: s.pivot.y + Math.cos(angle) * L
+      x: s.pivot.x + Math.sin(this.angle) * s.ropeLen,
+      y: s.pivot.y + Math.cos(this.angle) * s.ropeLen
     };
   }
 
-  grabCrate() {
+  /* ---- AUTO-GRAB: called every frame in update ---- */
+  tryAutoGrab() {
+    if (this.carrying || this.autoGrabCooldown > 0) return;
     const hook = this.hookPosition();
     const spec = this.spec;
     const owned = this.game.storage.get('owned', []);
     const magnet = owned.indexOf('hook_magnet') >= 0 && this.game.storage.get('uses_hook_magnet', 0) > 0;
-    const marginX = magnet ? 150 : 110;
-    const marginY = 140;
+    const grabRadius = magnet ? 160 : 130;
 
     const dockCrates = spec.crates.filter((c) => c.state === 'dock');
     let best = null;
     let bestDist = Infinity;
     dockCrates.forEach((c) => {
-      const dx = Math.abs(c.x - hook.x);
-      const dy = Math.abs(c.y - hook.y);
-      if (dx < marginX && dy < marginY && dx + dy * 0.3 < bestDist) {
+      const dx = c.x - hook.x;
+      const dy = c.y - hook.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < grabRadius && dist < bestDist) {
         best = c;
-        bestDist = dx + dy * 0.3;
+        bestDist = dist;
       }
     });
-    if (!best) return;
 
-    /* visual feedback: the crate snaps up to the hook */
-    best.y = hook.y + 46;
+    if (best) {
+      best.state = 'held';
+      best.grabbed = true;
+      this.carrying = best;
+      this.game.audio.sfx('grab');
+      this.spawnBurst(hook.x, hook.y, 12, ['#ffffff', '#b9f6ff', '#ffd166']);
+      this.addPopup(hook.x, hook.y - 40, 'GRAB!');
+      this.autoGrabCooldown = 0.6;
+    }
+  }
 
-    best.state = 'held';
-    best.grabbed = true;
-    this.carrying = best;
-    this.game.audio.sfx('grab');
-    this.spawnBurst(hook.x, hook.y, 10, ['#ffffff', '#b9f6ff']);
+  /* ---- AUTO-DROP: called every frame in update ---- */
+  tryAutoDrop() {
+    if (!this.carrying) return;
+    const hook = this.hookPosition();
+    const ship = this.spec.ship;
+    const holdLeft = this.shipX - ship.holdW / 2;
+    const holdRight = this.shipX + ship.holdW / 2;
+
+    /* drop zone: hook is horizontally over the ship hold area */
+    const margin = 80;
+    this.overShip = hook.x >= holdLeft - margin && hook.x <= holdRight + margin;
+
+    if (this.overShip) {
+      this.dropCrate();
+    }
   }
 
   dropCrate() {
@@ -454,13 +458,13 @@ class GameplayScreen extends BaseScreen {
     if (!crate) return;
     this.carrying = null;
 
-    /* the crate falls — cap horizontal velocity so drops are forgiving */
+    /* cap horizontal velocity so drops are forgiving */
     const rawVx = Math.cos(this.angle) * this.omega * this.spec.ropeLen;
-    const vx = Math.max(-260, Math.min(260, rawVx));
-    const vy = 30;
+    const vx = Math.max(-200, Math.min(200, rawVx));
+    const vy = 20;
     crate.state = 'falling';
     crate.x = hook.x;
-    crate.y = hook.y + 46;
+    crate.y = hook.y + 30;
     crate.vx = vx;
     crate.vy = vy;
     this.falling.push(crate);
@@ -477,10 +481,6 @@ class GameplayScreen extends BaseScreen {
       ship.baseX += (target - ship.baseX) * Math.min(1, delta * ship.speed * 0.12);
       this.shipX = ship.baseX;
     }
-  }
-
-  crateHoldX() {
-    return this.shipX;
   }
 
   updateFalling(delta) {
@@ -581,11 +581,6 @@ class GameplayScreen extends BaseScreen {
     this.addPopup(crate.x, 960, 'SPLASH!');
     this.updateHud();
 
-    /* life-loss feedback */
-    if (this.hearts >= 2) {
-      this.addPopup(360, 540, `${this.hearts - 1} HEART${this.hearts - 1 > 1 ? 'S' : ''} LEFT`);
-    }
-
     if (this.cratesLost >= 3) {
       this.phase = 'failSeq';
       this.phaseTimer = 1.1;
@@ -611,6 +606,8 @@ class GameplayScreen extends BaseScreen {
     this.time += dt;
     this.cloudOffset += dt * 12;
 
+    if (this.autoGrabCooldown > 0) this.autoGrabCooldown -= dt;
+
     if (this.bannerTimer > 0) {
       this.bannerTimer -= dt;
       if (this.bannerTimer <= 0) {
@@ -630,16 +627,16 @@ class GameplayScreen extends BaseScreen {
         this.windHintEl.style.display = 'flex';
       }
 
-      /* pendulum physics: α = -(g/L)sinθ + input + wind */
+      /* pendulum physics */
       const g = 2000;
       const L = spec.ropeLen;
       const gravity = -(g / L) * Math.sin(this.angle);
-      const input = this.swingDir * 300;
+      const input = this.swingDir * 350;
       const wind = this.windGust * 0.14;
-      const damping = -this.omega * 0.32;
+      const damping = -this.omega * 0.28;
       const alpha = gravity + input + wind + damping;
       this.omega += alpha * dt;
-      this.omega = Math.max(-7, Math.min(7, this.omega));
+      this.omega = Math.max(-8, Math.min(8, this.omega));
       this.angle += this.omega * dt;
 
       /* time */
@@ -651,9 +648,13 @@ class GameplayScreen extends BaseScreen {
         this.game.audio.sfx('fail');
       }
 
+      /* AUTO-GRAB + AUTO-DROP */
+      this.tryAutoGrab();
+      this.tryAutoDrop();
+
       this.updateFalling(dt);
 
-      /* all crates loaded → win (checked here too so the flow is robust) */
+      /* all crates loaded → win */
       if (this.phase === 'playing' && this.cratesLeft <= 0 && this.falling.length === 0 && this.carrying === null) {
         this.phase = 'winSeq';
         this.phaseTimer = 0.9;
@@ -662,15 +663,9 @@ class GameplayScreen extends BaseScreen {
         this.game.audio.stopMusic();
       }
 
-      /* swing creak every so often for life */
+      /* swing creak */
       if (Math.abs(this.omega) > 1.2 && Math.random() < dt * 0.8) {
         this.game.audio.sfx('swing');
-      }
-
-      if (this.phase === 'winSeq') {
-        this.phaseTimer = 0.9;
-      } else if (this.phase === 'failSeq' && this.phaseTimer <= 0.3 && !this.failHandled) {
-        /* handled below */
       }
     }
 
@@ -837,10 +832,10 @@ class GameplayScreen extends BaseScreen {
     this.tutorialActive = true;
     this.tutorialEl.innerHTML = `
       <div class="tutorial-box">
-        <div class="tutorial-step">◀ ▶ <strong>SWING</strong> the hook over a crate</div>
-        <div class="tutorial-step"><strong>GRAB</strong> it with the center button</div>
-        <div class="tutorial-step">Release <strong>OVER THE SHIP</strong> to drop</div>
-        <div class="tutorial-step">Watch the <span style="color:#8ac926">GREEN</span> target dot!</div>
+        <div class="tutorial-step">◀ ▶ <strong>SWING</strong> the pendulum with the arrows</div>
+        <div class="tutorial-step">The hook <strong>AUTO-GRABS</strong> a crate when it passes over one</div>
+        <div class="tutorial-step">It <strong>AUTO-DROPS</strong> over the ship!</div>
+        <div class="tutorial-step">⏱ Time your swings — <span style="color:#8ac926">only timing matters!</span></div>
         <button type="button" class="btn btn-primary btn-tutorial-ok">
           <span class="btn-label">GOT IT!</span>
         </button>
@@ -856,9 +851,7 @@ class GameplayScreen extends BaseScreen {
       this.game.audio.click();
       dismiss();
     });
-    /* tap anywhere on the overlay to dismiss */
     this.tutorialEl.addEventListener('click', dismiss, { once: true });
-    /* keyboard dismiss */
     this._tutKeyHandler = (e) => {
       if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') {
         e.preventDefault();
@@ -984,7 +977,6 @@ class GameplayScreen extends BaseScreen {
       this.drawCrates(ctx);
       this.drawCrane(ctx);
       this.drawFalling(ctx);
-      this.drawReticle(ctx);
       this.drawParticles(ctx);
       this.drawWind(ctx);
     }
@@ -1003,7 +995,6 @@ class GameplayScreen extends BaseScreen {
       w2: ['sky', 'cloud', 'sea', 'land', 'island', 'decor'],
       w3: ['sky', 'cloud', 'sea', 'land', 'decor'],
       w4: ['sky', 'cloud', 'sea', 'land', 'sun', 'decor'],
-      /* deepest layer first so the closer (opaque) sky shows through */
       w5: ['pixel-oc_1_240', 'pixel-oc_2_165', 'pixel-oc_3_122', 'pixel-oc_4_81'],
       w6: ['moon-and_4_91', 'moon-and_3_134', 'moon-and_2_182', 'moon-and_1_262']
     };
@@ -1011,11 +1002,9 @@ class GameplayScreen extends BaseScreen {
     list.forEach((name, index) => {
       const img = Assets.get(this.layerPath(dir, name));
       if (!img.complete || !img.naturalWidth) return;
-      /* cover-fit: fill the whole portrait canvas, keep aspect */
       const scale = Math.max(W / img.width, H / img.height);
       const w = img.width * scale;
       const h = img.height * scale;
-      /* subtle parallax drift between layers */
       const factor = 0.06 * (list.length - index);
       const drift = Math.sin(this.time * 0.2 + index) * 8;
       ctx.save();
@@ -1035,7 +1024,6 @@ class GameplayScreen extends BaseScreen {
       const bob = Math.sin(this.time * 3 + x * 0.02) * 6;
       ctx.drawImage(img, x, y + bob, tileW + 4, waveH);
     }
-    /* soft foam edge */
     ctx.fillStyle = 'rgba(255,255,255,0.18)';
     ctx.fillRect(0, y - 4, 720, 8);
   }
@@ -1045,6 +1033,7 @@ class GameplayScreen extends BaseScreen {
     const rock = Math.sin(this.shipPhase) * ship.rockAmp;
     const img = Assets.get('assets/game/ship.png');
     if (!img.complete || !img.naturalWidth) return;
+
     const w = 560;
     const h = 150;
     ctx.save();
@@ -1052,7 +1041,7 @@ class GameplayScreen extends BaseScreen {
     ctx.rotate(rock);
     ctx.drawImage(img, -w / 2, -h / 2, w, h);
 
-    /* hold outline (drop zone) */
+    /* hold outline */
     const holdLeft = this.shipX - ship.holdW / 2;
     const holdTop = ship.y - ship.holdH - 6;
     ctx.save();
@@ -1064,7 +1053,6 @@ class GameplayScreen extends BaseScreen {
     ctx.setLineDash([10, 8]);
     ctx.strokeRect(holdLeft, holdTop, ship.holdW, ship.holdH + 4);
     ctx.setLineDash([]);
-    ctx.restore();
 
     /* stacked crates in the hold */
     this.stacked.forEach((st) => {
@@ -1074,80 +1062,20 @@ class GameplayScreen extends BaseScreen {
       }
     });
     ctx.restore();
-  }
 
-  /* ---- wooden dock / quay where crates sit ---- */
-  drawDock(ctx) {
-    const spec = this.spec;
-    const W = 720;
-    const dockY = 810;  /* just below crate.y (780) */
-    const dockH = 28;
-    const waterY = spec.waterY || 940;
-
-    /* determine dock extent from crate positions */
-    const dockCrates = spec.crates.filter((c) => c.state === 'dock');
-    if (dockCrates.length === 0) {
-      /* fallback: full-width dock */
-      this._drawDockSegment(ctx, 30, W - 30, dockY, dockH, waterY);
-      return;
+    /* ── AUTO-DROP indicator: green glow over the hold ── */
+    if (this.carrying && this.overShip) {
+      ctx.save();
+      ctx.translate(this.shipX, ship.y);
+      ctx.rotate(rock);
+      ctx.translate(-this.shipX, -ship.y);
+      const glow = 0.25 + 0.15 * Math.sin(this.time * 6);
+      ctx.fillStyle = `rgba(138, 201, 38, ${glow})`;
+      ctx.fillRect(holdLeft, holdTop, ship.holdW, ship.holdH + 4);
+      ctx.restore();
     }
 
-    /* group crates by dock side */
-    const leftCrates = dockCrates.filter((c) => c.x < W / 2);
-    const rightCrates = dockCrates.filter((c) => c.x >= W / 2);
-
-    if (leftCrates.length > 0) {
-      const minX = Math.min(...leftCrates.map((c) => c.x)) - 60;
-      const maxX = Math.max(...leftCrates.map((c) => c.x)) + 60;
-      this._drawDockSegment(ctx, Math.max(0, minX), Math.min(W / 2, maxX), dockY, dockH, waterY);
-    }
-    if (rightCrates.length > 0) {
-      const minX = Math.min(...rightCrates.map((c) => c.x)) - 60;
-      const maxX = Math.max(...rightCrates.map((c) => c.x)) + 60;
-      this._drawDockSegment(ctx, Math.max(W / 2, minX), Math.min(W, maxX), dockY, dockH, waterY);
-    }
-  }
-
-  _drawDockSegment(ctx, x0, x1, dockY, dockH, waterY) {
-    const w = x1 - x0;
-    if (w <= 0) return;
-
-    /* dock surface (wood planks) */
-    const grad = ctx.createLinearGradient(x0, dockY, x0, dockY + dockH + 30);
-    grad.addColorStop(0, '#8B6914');
-    grad.addColorStop(0.3, '#A0782C');
-    grad.addColorStop(1, '#5C4A1A');
-    ctx.fillStyle = grad;
-    ctx.fillRect(x0, dockY, w, dockH);
-
-    /* plank lines */
-    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-    ctx.lineWidth = 1;
-    for (let x = x0 + 10; x < x1; x += 24) {
-      ctx.beginPath();
-      ctx.moveTo(x, dockY);
-      ctx.lineTo(x, dockY + dockH);
-      ctx.stroke();
-    }
-
-    /* dock top highlight */
-    ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillRect(x0, dockY, w, 3);
-
-    /* pilings (vertical posts) */
-    ctx.fillStyle = '#5C4A1A';
-    const pilingTop = dockY + dockH - 4;
-    for (let px = x0 + 10; px < x1; px += 60) {
-      ctx.fillRect(px, pilingTop, 8, waterY - pilingTop);
-      /* highlight */
-      ctx.fillStyle = 'rgba(255,255,255,0.08)';
-      ctx.fillRect(px, pilingTop, 3, waterY - pilingTop);
-      ctx.fillStyle = '#5C4A1A';
-    }
-
-    /* water splash under dock */
-    ctx.fillStyle = 'rgba(255,255,255,0.06)';
-    ctx.fillRect(x0, waterY - 6, w, 6);
+    ctx.restore();
   }
 
   drawCrates(ctx) {
@@ -1169,46 +1097,74 @@ class GameplayScreen extends BaseScreen {
       }
     });
 
-    /* the crate being carried hangs under the hook */
+    /* carried crate hangs under the hook with a rope */
     if (this.carrying) {
       const hook = this.hookPosition();
       const img = Assets.get(this.carrying.sprite);
       if (img.complete && img.naturalWidth) {
-        ctx.drawImage(img, hook.x - 48, hook.y + 20, 96, 74);
+        /* rope from hook to crate */
+        ctx.strokeStyle = '#5b3a1e';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(hook.x, hook.y + 10);
+        ctx.lineTo(hook.x, hook.y + 30);
+        ctx.stroke();
+
+        ctx.drawImage(img, hook.x - 48, hook.y + 30, 96, 74);
       }
     }
   }
 
   drawCrane(ctx) {
     const spec = this.spec;
+    const hook = this.hookPosition();
 
-    /* mast (crane tower) behind */
+    /* mast */
     const mast = Assets.get('assets/game/mast.png');
     if (mast.complete && mast.naturalWidth) {
       ctx.drawImage(mast, spec.pivot.x - 16, 0, 32, 340);
     }
 
-    /* rigging arm (horizontal beam) */
+    /* rigging arm */
     const rigging = Assets.get('assets/game/rigging.png');
     if (rigging.complete && rigging.naturalWidth) {
       ctx.drawImage(rigging, spec.pivot.x - 180, spec.pivot.y - 60, 360, 120);
     }
 
     /* rope from pivot to hook */
-    const hook = this.hookPosition();
-    const pivot = spec.pivot;
     ctx.strokeStyle = '#5b3a1e';
     ctx.lineWidth = 6;
     ctx.beginPath();
-    ctx.moveTo(pivot.x, pivot.y);
+    ctx.moveTo(spec.pivot.x, spec.pivot.y);
     ctx.lineTo(hook.x, hook.y);
     ctx.stroke();
     ctx.strokeStyle = 'rgba(255,255,255,0.25)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(pivot.x, pivot.y);
+    ctx.moveTo(spec.pivot.x, spec.pivot.y);
     ctx.lineTo(hook.x, hook.y);
     ctx.stroke();
+
+    /* ── NEAR-CRATE GLOW: golden ring when hook is close to a crate ── */
+    if (!this.carrying) {
+      const dockCrates = spec.crates.filter((c) => c.state === 'dock');
+      dockCrates.forEach((c) => {
+        const dx = c.x - hook.x;
+        const dy = c.y - hook.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 120) {
+          const intensity = 1 - dist / 120;
+          ctx.save();
+          ctx.globalAlpha = intensity * 0.6;
+          ctx.strokeStyle = '#ffd700';
+          ctx.lineWidth = 4 + intensity * 4;
+          ctx.beginPath();
+          ctx.arc(hook.x, hook.y, 20 + intensity * 15, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      });
+    }
 
     /* hook */
     const hookImg = Assets.get('assets/game/hook.png');
@@ -1223,11 +1179,11 @@ class GameplayScreen extends BaseScreen {
     /* pivot cap */
     ctx.fillStyle = '#3d2a12';
     ctx.beginPath();
-    ctx.arc(pivot.x, pivot.y, 14, 0, Math.PI * 2);
+    ctx.arc(spec.pivot.x, spec.pivot.y, 14, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#6b4a24';
     ctx.beginPath();
-    ctx.arc(pivot.x, pivot.y, 8, 0, Math.PI * 2);
+    ctx.arc(spec.pivot.x, spec.pivot.y, 8, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -1281,40 +1237,68 @@ class GameplayScreen extends BaseScreen {
     });
   }
 
-  /* ---- landing reticle: shows where the crate will land ---- */
-  drawReticle(ctx) {
-    if (this.phase !== 'playing' || !this.carrying) return;
-    const hook = this.hookPosition();
-    const rawVx = Math.cos(this.angle) * this.omega * this.spec.ropeLen;
-    const vx = Math.max(-260, Math.min(260, rawVx));
-    const vy0 = 30;
-    const g = 1500;
-    const ship = this.spec.ship;
-    const holdTop = ship.y - ship.holdH;
-    const startY = hook.y + 46;
-    const dist = holdTop - startY;
-    if (dist <= 0) return;
-    const a = 0.5 * g;
-    const t = (-vy0 + Math.sqrt(vy0 * vy0 + 4 * a * dist)) / (2 * a);
-    const landX = hook.x + vx * t;
-    const landY = holdTop;
-    /* dashed line from hook to landing spot */
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([8, 8]);
-    ctx.beginPath();
-    ctx.moveTo(hook.x, startY);
-    ctx.lineTo(landX, landY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    /* landing circle */
-    const inHold = landX >= ship.x - ship.holdW / 2 && landX <= ship.x + ship.holdW / 2;
-    ctx.strokeStyle = inHold ? 'rgba(138, 201, 38, 0.7)' : 'rgba(255, 93, 93, 0.7)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(landX, landY, 20, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+  /* ---- wooden dock / quay ---- */
+  drawDock(ctx) {
+    const spec = this.spec;
+    const W = 720;
+    const dockY = 810;
+    const dockH = 28;
+    const waterY = spec.waterY || 940;
+
+    const dockCrates = spec.crates.filter((c) => c.state === 'dock');
+    if (dockCrates.length === 0) {
+      this._drawDockSegment(ctx, 30, W - 30, dockY, dockH, waterY);
+      return;
+    }
+
+    const leftCrates = dockCrates.filter((c) => c.x < W / 2);
+    const rightCrates = dockCrates.filter((c) => c.x >= W / 2);
+
+    if (leftCrates.length > 0) {
+      const minX = Math.min(...leftCrates.map((c) => c.x)) - 60;
+      const maxX = Math.max(...leftCrates.map((c) => c.x)) + 60;
+      this._drawDockSegment(ctx, Math.max(0, minX), Math.min(W / 2, maxX), dockY, dockH, waterY);
+    }
+    if (rightCrates.length > 0) {
+      const minX = Math.min(...rightCrates.map((c) => c.x)) - 60;
+      const maxX = Math.max(...rightCrates.map((c) => c.x)) + 60;
+      this._drawDockSegment(ctx, Math.max(W / 2, minX), Math.min(W, maxX), dockY, dockH, waterY);
+    }
+  }
+
+  _drawDockSegment(ctx, x0, x1, dockY, dockH, waterY) {
+    const w = x1 - x0;
+    if (w <= 0) return;
+
+    const grad = ctx.createLinearGradient(x0, dockY, x0, dockY + dockH + 30);
+    grad.addColorStop(0, '#8B6914');
+    grad.addColorStop(0.3, '#A0782C');
+    grad.addColorStop(1, '#5C4A1A');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x0, dockY, w, dockH);
+
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    ctx.lineWidth = 1;
+    for (let x = x0 + 10; x < x1; x += 24) {
+      ctx.beginPath();
+      ctx.moveTo(x, dockY);
+      ctx.lineTo(x, dockY + dockH);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(x0, dockY, w, 3);
+
+    ctx.fillStyle = '#5C4A1A';
+    const pilingTop = dockY + dockH - 4;
+    for (let px = x0 + 10; px < x1; px += 60) {
+      ctx.fillRect(px, pilingTop, 8, waterY - pilingTop);
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(px, pilingTop, 3, waterY - pilingTop);
+      ctx.fillStyle = '#5C4A1A';
+    }
+
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(x0, waterY - 6, w, 6);
   }
 }
