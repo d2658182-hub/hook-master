@@ -1,0 +1,17 @@
+{
+  "platforms": {
+    "playgama": { "options": {} }
+  },
+  "advertisement": {
+    "interstitial": {
+      "minimumDelay": 60
+    },
+    "rewarded": {
+      "placements": [
+        { "id": "revive", "playgama": "revive" },
+        { "id": "double_coins", "playgama": "double_coins" },
+        { "id": "shop_item", "playgama": "shop_item" }
+      ]
+    }
+  }
+}
