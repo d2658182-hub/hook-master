@@ -138,12 +138,17 @@ class GameplayScreen extends BaseScreen {
       </div>
     `;
 
+    this.tutorialEl = document.createElement('div');
+    this.tutorialEl.className = 'tutorial-overlay';
+    this.tutorialEl.style.display = 'none';
+
     this.el.appendChild(this.canvas);
     this.el.appendChild(this.hud);
     this.el.appendChild(this.controls);
     this.el.appendChild(this.bannerEl);
     this.el.appendChild(this.windHintEl);
     this.el.appendChild(this.comboEl);
+    this.el.appendChild(this.tutorialEl);
     this.el.appendChild(this.pauseOverlay);
 
     this.hud.querySelector('.btn-pause').addEventListener('click', () => {
@@ -314,6 +319,11 @@ class GameplayScreen extends BaseScreen {
     this.updateHud();
     SDK.sendMessage('level_started', { world: spec.world + 1, level });
     SDK.sendMessage('gameplay_started');
+
+    /* tutorial on level 1 */
+    if (level === 1 && !forceFresh) {
+      this.showTutorial();
+    }
   }
 
   stopGameplay() {
@@ -411,19 +421,24 @@ class GameplayScreen extends BaseScreen {
     const spec = this.spec;
     const owned = this.game.storage.get('owned', []);
     const magnet = owned.indexOf('hook_magnet') >= 0 && this.game.storage.get('uses_hook_magnet', 0) > 0;
-    const margin = magnet ? 110 : 62;
+    const marginX = magnet ? 150 : 110;
+    const marginY = 140;
 
     const dockCrates = spec.crates.filter((c) => c.state === 'dock');
     let best = null;
     let bestDist = Infinity;
     dockCrates.forEach((c) => {
-      const dist = Math.abs(c.x - hook.x);
-      if (dist < margin && dist < bestDist) {
+      const dx = Math.abs(c.x - hook.x);
+      const dy = Math.abs(c.y - hook.y);
+      if (dx < marginX && dy < marginY && dx + dy * 0.3 < bestDist) {
         best = c;
-        bestDist = dist;
+        bestDist = dx + dy * 0.3;
       }
     });
     if (!best) return;
+
+    /* visual feedback: the crate snaps up to the hook */
+    best.y = hook.y + 46;
 
     best.state = 'held';
     best.grabbed = true;
@@ -438,9 +453,10 @@ class GameplayScreen extends BaseScreen {
     if (!crate) return;
     this.carrying = null;
 
-    /* the crate falls with the hook's horizontal velocity */
-    const vx = Math.cos(this.angle) * this.omega * this.spec.ropeLen;
-    const vy = -Math.sin(this.angle) * this.omega * this.spec.ropeLen * 0.6 + 60;
+    /* the crate falls — cap horizontal velocity so drops are forgiving */
+    const rawVx = Math.cos(this.angle) * this.omega * this.spec.ropeLen;
+    const vx = Math.max(-260, Math.min(260, rawVx));
+    const vy = 30;
     crate.state = 'falling';
     crate.x = hook.x;
     crate.y = hook.y + 46;
@@ -563,6 +579,11 @@ class GameplayScreen extends BaseScreen {
     this.spawnBurst(crate.x, Math.min(crate.y, 1000), 16, ['#4cc9f0', '#b9f6ff', '#ffffff']);
     this.addPopup(crate.x, 960, 'SPLASH!');
     this.updateHud();
+
+    /* life-loss feedback */
+    if (this.hearts >= 2) {
+      this.addPopup(360, 540, `${this.hearts - 1} HEART${this.hearts - 1 > 1 ? 'S' : ''} LEFT`);
+    }
 
     if (this.cratesLost >= 3) {
       this.phase = 'failSeq';
@@ -811,6 +832,25 @@ class GameplayScreen extends BaseScreen {
     if (cratesValue) cratesValue.textContent = this.cratesLeft.toLocaleString('en-US');
   }
 
+  showTutorial() {
+    this.tutorialEl.innerHTML = `
+      <div class="tutorial-box">
+        <div class="tutorial-step">◀ ▶ <strong>SWING</strong> the hook over a crate</div>
+        <div class="tutorial-step"><strong>GRAB</strong> it with the center button</div>
+        <div class="tutorial-step">Release <strong>OVER THE SHIP</strong> to drop</div>
+        <div class="tutorial-step">Watch the <span style="color:#8ac926">GREEN</span> target dot!</div>
+        <button type="button" class="btn btn-primary btn-tutorial-ok">
+          <span class="btn-label">GOT IT!</span>
+        </button>
+      </div>
+    `;
+    this.tutorialEl.style.display = 'flex';
+    this.tutorialEl.querySelector('.btn-tutorial-ok').addEventListener('click', () => {
+      this.game.audio.click();
+      this.tutorialEl.style.display = 'none';
+    });
+  }
+
   showBanner(banner) {
     if (!banner) {
       this.bannerEl.style.display = 'none';
@@ -921,10 +961,12 @@ class GameplayScreen extends BaseScreen {
     if (this.spec) {
       this.drawBackground(ctx);
       this.drawWater(ctx);
+      this.drawDock(ctx);
       this.drawShip(ctx);
       this.drawCrates(ctx);
       this.drawCrane(ctx);
       this.drawFalling(ctx);
+      this.drawReticle(ctx);
       this.drawParticles(ctx);
       this.drawWind(ctx);
     }
@@ -1014,6 +1056,80 @@ class GameplayScreen extends BaseScreen {
       }
     });
     ctx.restore();
+  }
+
+  /* ---- wooden dock / quay where crates sit ---- */
+  drawDock(ctx) {
+    const spec = this.spec;
+    const W = 720;
+    const dockY = 810;  /* just below crate.y (780) */
+    const dockH = 28;
+    const waterY = spec.waterY || 940;
+
+    /* determine dock extent from crate positions */
+    const dockCrates = spec.crates.filter((c) => c.state === 'dock');
+    if (dockCrates.length === 0) {
+      /* fallback: full-width dock */
+      this._drawDockSegment(ctx, 30, W - 30, dockY, dockH, waterY);
+      return;
+    }
+
+    /* group crates by dock side */
+    const leftCrates = dockCrates.filter((c) => c.x < W / 2);
+    const rightCrates = dockCrates.filter((c) => c.x >= W / 2);
+
+    if (leftCrates.length > 0) {
+      const minX = Math.min(...leftCrates.map((c) => c.x)) - 60;
+      const maxX = Math.max(...leftCrates.map((c) => c.x)) + 60;
+      this._drawDockSegment(ctx, Math.max(0, minX), Math.min(W / 2, maxX), dockY, dockH, waterY);
+    }
+    if (rightCrates.length > 0) {
+      const minX = Math.min(...rightCrates.map((c) => c.x)) - 60;
+      const maxX = Math.max(...rightCrates.map((c) => c.x)) + 60;
+      this._drawDockSegment(ctx, Math.max(W / 2, minX), Math.min(W, maxX), dockY, dockH, waterY);
+    }
+  }
+
+  _drawDockSegment(ctx, x0, x1, dockY, dockH, waterY) {
+    const w = x1 - x0;
+    if (w <= 0) return;
+
+    /* dock surface (wood planks) */
+    const grad = ctx.createLinearGradient(x0, dockY, x0, dockY + dockH + 30);
+    grad.addColorStop(0, '#8B6914');
+    grad.addColorStop(0.3, '#A0782C');
+    grad.addColorStop(1, '#5C4A1A');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x0, dockY, w, dockH);
+
+    /* plank lines */
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    ctx.lineWidth = 1;
+    for (let x = x0 + 10; x < x1; x += 24) {
+      ctx.beginPath();
+      ctx.moveTo(x, dockY);
+      ctx.lineTo(x, dockY + dockH);
+      ctx.stroke();
+    }
+
+    /* dock top highlight */
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(x0, dockY, w, 3);
+
+    /* pilings (vertical posts) */
+    ctx.fillStyle = '#5C4A1A';
+    const pilingTop = dockY + dockH - 4;
+    for (let px = x0 + 10; px < x1; px += 60) {
+      ctx.fillRect(px, pilingTop, 8, waterY - pilingTop);
+      /* highlight */
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(px, pilingTop, 3, waterY - pilingTop);
+      ctx.fillStyle = '#5C4A1A';
+    }
+
+    /* water splash under dock */
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(x0, waterY - 6, w, 6);
   }
 
   drawCrates(ctx) {
@@ -1145,5 +1261,42 @@ class GameplayScreen extends BaseScreen {
       }
       ctx.restore();
     });
+  }
+
+  /* ---- landing reticle: shows where the crate will land ---- */
+  drawReticle(ctx) {
+    if (this.phase !== 'playing' || !this.carrying) return;
+    const hook = this.hookPosition();
+    const rawVx = Math.cos(this.angle) * this.omega * this.spec.ropeLen;
+    const vx = Math.max(-260, Math.min(260, rawVx));
+    const vy0 = 30;
+    const g = 1500;
+    const ship = this.spec.ship;
+    const holdTop = ship.y - ship.holdH;
+    const startY = hook.y + 46;
+    const dist = holdTop - startY;
+    if (dist <= 0) return;
+    const a = 0.5 * g;
+    const t = (-vy0 + Math.sqrt(vy0 * vy0 + 4 * a * dist)) / (2 * a);
+    const landX = hook.x + vx * t;
+    const landY = holdTop;
+    /* dashed line from hook to landing spot */
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath();
+    ctx.moveTo(hook.x, startY);
+    ctx.lineTo(landX, landY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    /* landing circle */
+    const inHold = landX >= ship.x - ship.holdW / 2 && landX <= ship.x + ship.holdW / 2;
+    ctx.strokeStyle = inHold ? 'rgba(138, 201, 38, 0.7)' : 'rgba(255, 93, 93, 0.7)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(landX, landY, 20, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 }

@@ -84,7 +84,7 @@ const LevelGen = (() => {
     /* ---- difficulty curve (smooth linear, last level stays doable) ---- */
     const t = (level - 1) / 299;                 /* 0 → 1 */
     const ropeLen = Math.round(lerp(430, 560, t * 0.5 + Math.sin(t * Math.PI) * 0.25));
-    const holdW = Math.round(lerp(430, 300, t));
+    const holdW = Math.round(lerp(520, 340, t));
     const crateCount = Math.min(9, 2 + Math.floor(level / 28));
     const timeBudget = Math.round(lerp(55, 100, t) + crateCount * 7);
     const rockSpeed = lerp(0.8, 1.7, t);
@@ -109,9 +109,9 @@ const LevelGen = (() => {
     const ship = {
       x: 360,
       baseX: 360,
-      y: 1030,
+      y: 1060,
       holdW,
-      holdH: 92,
+      holdH: 100,
       range: shipRange,
       speed: shipSpeed,
       phase: rng() * Math.PI * 2,
@@ -132,7 +132,7 @@ const LevelGen = (() => {
         const golden = hasGolden && rng() < goldenChance;
         crates.push({
           x,
-          y: 908,
+          y: 780,
           w: 96,
           h: 74,
           side,
@@ -174,7 +174,7 @@ const LevelGen = (() => {
       storm,
       doubleCoins: doubleCoinsLevel(level),
       timeBudget,
-      waterY: 960
+      waterY: 940
     };
   }
 

@@ -552,6 +552,53 @@ body::before {
   background: rgba(0, 0, 0, 0.55);
 }
 
+/* ── tutorial overlay ── */
+.tutorial-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 20;
+  color: #fff;
+  font-family: var(--font-title);
+  animation: tutFadeIn 0.3s ease;
+}
+
+.tutorial-overlay h2 {
+  font-size: clamp(1.4rem, 5vw, 2.4rem);
+  margin-bottom: 0.4em;
+  color: var(--gold);
+  text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+}
+
+.tutorial-overlay p {
+  font-size: clamp(0.9rem, 3vw, 1.3rem);
+  margin: 0.2em 0;
+  opacity: 0.9;
+  text-align: center;
+  padding: 0 1em;
+}
+
+.tutorial-overlay .tap-hint {
+  margin-top: 1em;
+  font-size: clamp(0.75rem, 2.5vw, 1rem);
+  opacity: 0.6;
+  animation: tutPulse 1.5s ease infinite;
+}
+
+@keyframes tutFadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes tutPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.9; }
+}
+
 /* in-game pause overlay */
 .pause-ui {
   position: absolute;
