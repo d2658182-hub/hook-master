@@ -102,6 +102,11 @@ window.__SELFTEST_RUN = async function run(game) {
   game.show('gameplay', { level: 1 });
   let s = game.screens.current;
   await settle();
+  /* dismiss tutorial so the game loop runs */
+  s.tutorialActive = false;
+  const tutBtn = s.tutorialEl.querySelector('.btn-tutorial-ok');
+  if (tutBtn) tutBtn.click();
+  await settle();
   check('gameplay: screen is gameplay', s.name === 'gameplay');
   check('gameplay: spec generated (300 max levels)', LevelGen.MAX_LEVEL === 300);
   check('gameplay: crates placed on dock', s.spec.crates.length >= 2, 'n=' + s.spec.crates.length);

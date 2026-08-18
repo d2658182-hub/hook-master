@@ -37,12 +37,12 @@ table below (attribution is given in the game's README as well).
 |---|---|---|---|
 | `assets/ui/` | UI Pack (buttons, panels, bars, coins) | CC0 | https://kenney.nl/assets/ui-pack |
 
-## Music & sound effects (all CC0)
+## Music & sound effects
 
 | File | Track / SFX | License | Source |
 |---|---|---|---|
-| `assets/audio/music-menu.ogg` | Happy Adventure (loop) — xDeviruchi | CC0 | https://opengameart.org/content/happy-adventure-loop |
-| `assets/audio/music-gameplay.ogg` | 8-bit Music Pack (loopable) — Tix | CC0 | https://opengameart.org/content/8-bit-music-pack-loopable |
+| `assets/audio/music-menu.ogg` | Seaside Village — Leonardo Paz | CC-BY 4.0 (attribution: Leonardo Paz) | https://opengameart.org/content/ocean-music-pack |
+| `assets/audio/music-gameplay.ogg` | Exploring the Ocean — Leonardo Paz | CC-BY 4.0 (attribution: Leonardo Paz) | https://opengameart.org/content/ocean-music-pack |
 | `assets/audio/sfx-*.ogg` (click, select, tick, pop, collect, win, fail, cut, rise, unlock) | Interface Sounds / Digital Audio / Casual Audio / UI Audio — Kenney | CC0 | https://kenney.nl/assets/interface-sounds · https://kenney.nl/assets/digital-audio · https://kenney.nl/assets/casual-audio |
 
 ## Code

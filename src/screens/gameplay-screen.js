@@ -43,6 +43,7 @@ class GameplayScreen extends BaseScreen {
     this.fragileBroken = false;
     this.time = 0;
     this.cloudOffset = 0;
+    this.tutorialActive = false;
     this.banner = null;
     this.bannerTimer = 0;
     this.bannerEl = null;
@@ -398,7 +399,7 @@ class GameplayScreen extends BaseScreen {
   /* ---------------- core actions ---------------- */
 
   onGrabDrop() {
-    if (this.paused || this.phase !== 'playing') return;
+    if (this.paused || this.tutorialActive || this.phase !== 'playing') return;
     if (this.carrying) {
       this.dropCrate();
     } else {
@@ -618,7 +619,7 @@ class GameplayScreen extends BaseScreen {
       }
     }
 
-    if (this.phase === 'playing') {
+    if (this.phase === 'playing' && !this.tutorialActive) {
       this.updateShip(dt);
 
       /* wind gust */
@@ -833,6 +834,7 @@ class GameplayScreen extends BaseScreen {
   }
 
   showTutorial() {
+    this.tutorialActive = true;
     this.tutorialEl.innerHTML = `
       <div class="tutorial-box">
         <div class="tutorial-step">◀ ▶ <strong>SWING</strong> the hook over a crate</div>
@@ -848,6 +850,7 @@ class GameplayScreen extends BaseScreen {
     this.tutorialEl.querySelector('.btn-tutorial-ok').addEventListener('click', () => {
       this.game.audio.click();
       this.tutorialEl.style.display = 'none';
+      this.tutorialActive = false;
     });
   }
 

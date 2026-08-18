@@ -18,7 +18,8 @@ const puppeteer = require('puppeteer-core');
   page.on('console', (msg) => logs.push(msg.text()));
   page.on('pageerror', (err) => logs.push('PAGEERROR: ' + err.message));
 
-  await page.goto('http://127.0.0.1:8765/tools/selftest-page.html', { waitUntil: 'load' });
+  const url = process.argv[2] || 'http://127.0.0.1:8765/tools/selftest-page.html';
+  await page.goto(url, { waitUntil: 'load' });
 
   /* wait for the async selftest to finish (title flips to PASS/FAIL) */
   await page.waitForFunction(
